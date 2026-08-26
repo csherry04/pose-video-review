@@ -5,5 +5,6 @@ dependencies:
   - python=3.11
   - numpy>=1.24
   - opencv>=4.8
+  - ffmpeg>=6
   - pip>=23
   - setuptools>=68

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 import cv2
@@ -9,6 +13,49 @@ import numpy as np
 
 
 VIDEO_EXTENSIONS = {".avi", ".m4v", ".mov", ".mp4"}
+
+
+@lru_cache(maxsize=256)
+def _probe_frame_timestamps(path_value: str, file_size: int, modified_ns: int) -> tuple[float, ...]:
+    """Return normalized presentation timestamps; size and mtime invalidate the cache."""
+    del file_size, modified_ns
+    executable = shutil.which("ffprobe")
+    if executable is None:
+        raise RuntimeError("ffprobe is required. Update the Conda environment to install FFmpeg.")
+    command = [
+        executable,
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_frames",
+        "-show_entries", "frame=best_effort_timestamp_time",
+        "-of", "json",
+        path_value,
+    ]
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)
+    except subprocess.CalledProcessError as exc:
+        message = exc.stderr.strip() or "unknown FFprobe error"
+        raise ValueError(f"Could not index video frames: {path_value} ({message})") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"Timed out while indexing video frames: {path_value}") from exc
+    payload = json.loads(completed.stdout)
+    timestamps = [
+        float(frame["best_effort_timestamp_time"])
+        for frame in payload.get("frames", [])
+        if frame.get("best_effort_timestamp_time") not in (None, "N/A")
+    ]
+    if not timestamps:
+        raise ValueError(f"FFprobe returned no video frame timestamps: {path_value}")
+    first = timestamps[0]
+    normalized = tuple(round(timestamp - first, 9) for timestamp in timestamps)
+    if any(current < previous for previous, current in zip(normalized, normalized[1:])):
+        raise ValueError(f"Video frame timestamps are not ordered: {path_value}")
+    return normalized
+
+
+def frame_timestamps(path: Path) -> list[float]:
+    stat = path.stat()
+    return list(_probe_frame_timestamps(str(path.resolve()), stat.st_size, stat.st_mtime_ns))
 
 
 def video_metadata(path: Path) -> tuple[float, int, int, int]:
@@ -79,22 +126,26 @@ def infer_sync_frame_offset(original_path: Path, sync_path: Path) -> int:
     max_offset = len(original_frames) - sync_count
     originals = np.asarray(original_frames, dtype=np.float32)
     sample_indices = sorted({0, sync_count // 4, sync_count // 2, 3 * sync_count // 4, sync_count - 1})
-    scores = np.zeros(max_offset + 1, dtype=float)
-    samples_read = 0
+    wanted_samples = set(sample_indices)
+    sync_samples = {}
     sync_capture = cv2.VideoCapture(str(sync_path))
     try:
-        for frame_index in sample_indices:
-            sync_capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        frame_index = 0
+        while frame_index <= sample_indices[-1]:
             ok, frame = sync_capture.read()
             if not ok:
-                continue
-            target = _thumbnail(frame).astype(np.float32)
-            candidates = originals[frame_index:frame_index + max_offset + 1]
-            scores += np.mean((candidates - target) ** 2, axis=(1, 2))
-            samples_read += 1
+                break
+            if frame_index in wanted_samples:
+                sync_samples[frame_index] = _thumbnail(frame).astype(np.float32)
+            frame_index += 1
     finally:
         sync_capture.release()
-    return int(np.argmin(scores)) if samples_read else 0
+
+    scores = np.zeros(max_offset + 1, dtype=float)
+    for frame_index, target in sync_samples.items():
+        candidates = originals[frame_index:frame_index + max_offset + 1]
+        scores += np.mean((candidates - target) ** 2, axis=(1, 2))
+    return int(np.argmin(scores)) if sync_samples else 0
 
 
 def _pose_type(path: Path) -> str:
@@ -141,7 +192,9 @@ def discover_session(path: Path) -> list[dict]:
         if video is None:
             continue
 
-        fps, width, height, frame_count = video_metadata(video)
+        fps, width, height, _ = video_metadata(video)
+        timestamps = frame_timestamps(video)
+        frame_count = len(timestamps)
         pose_width, pose_height = width, height
         pose_frame_offset = 0
         if original is not None:
@@ -158,11 +211,13 @@ def discover_session(path: Path) -> list[dict]:
             "poseWidth": pose_width,
             "poseHeight": pose_height,
             "fps": fps,
+            "frameTimes": timestamps,
+            "frameTiming": "verified-pts",
             "width": width,
             "height": height,
             "numFrames": frame_count,
             "frameRange": [0, frame_count - 1],
-            "durationSeconds": (frame_count - 1) / fps,
+            "durationSeconds": timestamps[-1],
         })
 
     if not rows:

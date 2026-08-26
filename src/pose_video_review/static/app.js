@@ -3,6 +3,9 @@ const state = {
   entries: [],
   poses: new Map(),
   offsets: new Map(),
+  presentedFrames: new Map(),
+  pendingFrames: new Map(),
+  verification: new Map(),
   elapsed: 0,
   duration: 0,
   playing: false,
@@ -21,6 +24,7 @@ const els = Object.fromEntries([
 ].map((id) => [id, document.getElementById(id)]));
 
 const TILE_SIZE_STORAGE_KEY = "pose-video-review:tile-size";
+const { frameForMediaTime: indexedFrameForMediaTime, frameSeekTime: indexedFrameSeekTime } = FrameTiming;
 
 async function getJson(url) {
   const response = await fetch(url);
@@ -102,18 +106,30 @@ function offsetFrames(entry) {
   return state.offsets.get(entry.id) || 0;
 }
 
+function frameForMediaTime(entry, mediaTime) {
+  return indexedFrameForMediaTime(entry.frameTimes, entry.fps, mediaTime);
+}
+
+function baseFrameAt(entry, elapsed = state.elapsed) {
+  return Math.max(0, Math.min(entry.numFrames - 1, frameForMediaTime(entry, elapsed)));
+}
+
 function frameAt(entry, elapsed = state.elapsed) {
-  const [start, end] = entry.frameRange;
-  const frame = Math.round(start + elapsed * entry.fps + offsetFrames(entry));
+  const frame = baseFrameAt(entry, elapsed) + offsetFrames(entry);
   return Math.max(0, Math.min(entry.numFrames - 1, frame));
 }
 
-function targetVideoTime(entry, elapsed = state.elapsed) {
-  return frameAt(entry, elapsed) / entry.fps;
+function frameSeekTime(entry, frame, attempt = 0) {
+  return indexedFrameSeekTime(entry.frameTimes, entry.fps, frame, attempt);
 }
 
 function referenceStep() {
-  return state.entries.length ? 1 / state.entries[0].fps : 1 / 30;
+  if (!state.entries.length) return 1 / 30;
+  const entry = state.entries[0];
+  if (!entry.frameTimes?.length) return 1 / entry.fps;
+  const frame = baseFrameAt(entry);
+  if (frame + 1 < entry.frameTimes.length) return entry.frameTimes[frame + 1] - entry.frameTimes[frame];
+  return frame > 0 ? entry.frameTimes[frame] - entry.frameTimes[frame - 1] : 1 / entry.fps;
 }
 
 function videoFor(entry) {
@@ -124,6 +140,75 @@ function overlayFor(entry) {
   return document.querySelector(`canvas[data-entry-id="${entry.id}"]`);
 }
 
+function setVerification(entry, status) {
+  state.verification.set(entry.id, status);
+  const label = document.querySelector(`[data-frame-label="${entry.id}"]`);
+  if (label) label.className = `frame-label ${status}`;
+}
+
+function updateFrameLabel(entry, requestedFrame, displayedFrame) {
+  const label = document.querySelector(`[data-frame-label="${entry.id}"]`);
+  if (!label) return;
+  const status = state.verification.get(entry.id) || "unverified";
+  const timestamp = entry.frameTimes?.[displayedFrame] ?? displayedFrame / entry.fps;
+  if (status === "verified") label.textContent = `frame ${displayedFrame} ✓ · ${timestamp.toFixed(3)} s`;
+  else if (status === "seeking") label.textContent = `seeking frame ${requestedFrame}…`;
+  else if (status === "mismatch") label.textContent = `frame ${displayedFrame} ≠ requested ${requestedFrame}`;
+  else if (status === "live") label.textContent = `frame ${displayedFrame} · live`;
+  else label.textContent = `frame ${displayedFrame} · unverified`;
+}
+
+function seekEntry(entry, video, force = false, verify = !state.playing) {
+  if (!video || video.readyState === HTMLMediaElement.HAVE_NOTHING) return;
+  const targetFrame = frameAt(entry);
+  const targetTime = frameSeekTime(entry, targetFrame);
+  const supportsVerification = typeof video.requestVideoFrameCallback === "function";
+  if (verify && supportsVerification) {
+    if (state.presentedFrames.get(entry.id) === targetFrame && !video.seeking) {
+      state.pendingFrames.delete(entry.id);
+      setVerification(entry, "verified");
+    } else {
+      state.pendingFrames.set(entry.id, { frame: targetFrame, attempt: 0 });
+      setVerification(entry, "seeking");
+    }
+  } else if (!supportsVerification) {
+    setVerification(entry, "unverified");
+  }
+  if (force || Math.abs(video.currentTime - targetTime) > 0.08) video.currentTime = targetTime;
+}
+
+function observeVideoFrames(entry, video) {
+  if (typeof video.requestVideoFrameCallback !== "function") {
+    setVerification(entry, "unverified");
+    return;
+  }
+  const observe = (_now, metadata) => {
+    if (!video.isConnected) return;
+    const actualFrame = frameForMediaTime(entry, metadata.mediaTime);
+    state.presentedFrames.set(entry.id, actualFrame);
+    const pending = state.pendingFrames.get(entry.id);
+    if (state.playing) {
+      state.pendingFrames.delete(entry.id);
+      setVerification(entry, "live");
+    } else if (pending && !video.seeking) {
+      if (actualFrame === pending.frame) {
+        state.pendingFrames.delete(entry.id);
+        setVerification(entry, "verified");
+      } else if (pending.attempt < 2) {
+        pending.attempt += 1;
+        setVerification(entry, "seeking");
+        video.currentTime = frameSeekTime(entry, pending.frame, pending.attempt);
+      } else {
+        state.pendingFrames.delete(entry.id);
+        setVerification(entry, "mismatch");
+      }
+    }
+    renderEntry(entry);
+    video.requestVideoFrameCallback(observe);
+  };
+  video.requestVideoFrameCallback(observe);
+}
+
 function pauseVideos() {
   state.playing = false;
   els.playButton.textContent = "Play";
@@ -132,13 +217,10 @@ function pauseVideos() {
   for (const entry of state.entries) videoFor(entry)?.pause();
 }
 
-function seekVideos(force = false) {
+function seekVideos(force = false, verify = !state.playing) {
   for (const entry of state.entries) {
     const video = videoFor(entry);
-    if (!video) continue;
-    if (video.readyState === HTMLMediaElement.HAVE_NOTHING) continue;
-    const target = targetVideoTime(entry);
-    if (force || Math.abs(video.currentTime - target) > 0.08) video.currentTime = target;
+    seekEntry(entry, video, force, verify);
   }
 }
 
@@ -186,12 +268,12 @@ function drawPose(ctx, payload, frame, scaleX, scaleY) {
 }
 
 function renderEntry(entry) {
-  const frame = frameAt(entry);
-  const poseFrame = frame + (entry.poseFrameOffset || 0);
-  const label = document.querySelector(`[data-frame-label="${entry.id}"]`);
-  if (label) label.textContent = `frame ${frame} · ${(frame / entry.fps).toFixed(3)} s`;
+  const requestedFrame = frameAt(entry);
+  const displayedFrame = state.presentedFrames.get(entry.id) ?? requestedFrame;
+  const poseFrame = displayedFrame + (entry.poseFrameOffset || 0);
+  updateFrameLabel(entry, requestedFrame, displayedFrame);
   const cameraSlider = document.querySelector(`input[data-offset-input="${entry.id}"]`);
-  if (cameraSlider) cameraSlider.value = String(frame);
+  if (cameraSlider) cameraSlider.value = String(requestedFrame);
   updateOffsetLabel(entry);
   const overlay = resizeOverlay(entry);
   if (!overlay) return;
@@ -220,20 +302,32 @@ function setElapsed(value, seek = true) {
   render();
 }
 
+function stepSharedFrame(direction) {
+  if (!state.entries.length) return;
+  const reference = state.entries[0];
+  const current = baseFrameAt(reference);
+  const target = Math.max(0, Math.min(reference.numFrames - 1, current + direction));
+  const elapsed = reference.frameTimes?.[target] ?? target / reference.fps;
+  setElapsed(elapsed, true);
+}
+
 function updateOffsetLabel(entry) {
   const frame = frameAt(entry);
+  const baseFrame = baseFrameAt(entry);
   const frames = offsetFrames(entry);
   const output = document.querySelector(`[data-offset-label="${entry.id}"]`);
   if (output) {
     const sign = frames > 0 ? "+" : "";
-    const seconds = frames / entry.fps;
+    const baseTime = entry.frameTimes?.[baseFrame] ?? baseFrame / entry.fps;
+    const frameTime = entry.frameTimes?.[frame] ?? frame / entry.fps;
+    const seconds = frameTime - baseTime;
     output.textContent = `frame ${frame} · offset ${sign}${frames} f (${seconds >= 0 ? "+" : ""}${seconds.toFixed(3)} s)`;
   }
 }
 
 function setCameraFrame(entry, value) {
   const selectedFrame = Math.round(Number(value) || 0);
-  const sharedFrame = Math.round(entry.frameRange[0] + state.elapsed * entry.fps);
+  const sharedFrame = baseFrameAt(entry);
   const frames = selectedFrame - sharedFrame;
   state.offsets.set(entry.id, frames);
   els.saveOffsetsButton.disabled = false;
@@ -255,6 +349,10 @@ function buildTiles() {
   els.cameraGrid.innerHTML = "";
   for (const entry of state.entries) {
     state.offsets.set(entry.id, loadOffset(entry));
+    state.verification.set(
+      entry.id,
+      typeof HTMLVideoElement.prototype.requestVideoFrameCallback === "function" ? "seeking" : "unverified",
+    );
     const tile = document.createElement("article");
     tile.className = "camera-tile";
 
@@ -263,6 +361,7 @@ function buildTiles() {
     title.textContent = entry.camera;
     const frameLabel = document.createElement("span");
     frameLabel.dataset.frameLabel = entry.id;
+    frameLabel.className = "frame-label seeking";
     header.append(title, frameLabel);
 
     const stage = document.createElement("div");
@@ -290,10 +389,12 @@ function buildTiles() {
     video.disablePictureInPicture = true;
     video.setAttribute("aria-label", `${entry.camera} video`);
     video.addEventListener("loadedmetadata", () => {
-      video.currentTime = targetVideoTime(entry);
-      renderEntry(entry);
+      observeVideoFrames(entry, video);
+      seekEntry(entry, video, true, true);
     });
-    video.addEventListener("seeked", () => renderEntry(entry));
+    video.addEventListener("seeked", () => {
+      if (typeof video.requestVideoFrameCallback !== "function") renderEntry(entry);
+    });
     const overlay = document.createElement("canvas");
     overlay.dataset.entryId = entry.id;
     overlay.setAttribute("aria-hidden", "true");
@@ -325,7 +426,7 @@ function buildTiles() {
 
     const footer = document.createElement("footer");
     const metadata = document.createElement("span");
-    metadata.textContent = `${entry.width}×${entry.height} · ${entry.fps.toFixed(2)} fps`;
+    metadata.textContent = `${entry.width}×${entry.height} · ${entry.numFrames} indexed frames`;
     const poseState = document.createElement("span");
     poseState.className = "pose-state loading";
     poseState.dataset.poseState = entry.id;
@@ -363,11 +464,14 @@ async function loadTrial(id) {
   state.duration = Math.min(...state.entries.map((entry) => entry.durationSeconds));
   state.poses.clear();
   state.offsets.clear();
+  state.presentedFrames.clear();
+  state.pendingFrames.clear();
+  state.verification.clear();
   buildTiles();
   els.saveOffsetsButton.disabled = false;
   els.saveOffsetsButton.classList.remove("unsaved");
   els.timeSlider.max = String(state.duration);
-  els.timeSlider.step = String(referenceStep());
+  els.timeSlider.step = "any";
   els.duration.textContent = `${state.duration.toFixed(3)} s`;
   seekVideos(true);
   render();
@@ -418,7 +522,9 @@ function tick(timestamp) {
 async function startPlayback() {
   if (state.elapsed >= state.duration - referenceStep() / 2) setElapsed(0, true);
   const rate = Number(els.speedSelect.value);
-  seekVideos(true);
+  state.pendingFrames.clear();
+  for (const entry of state.entries) setVerification(entry, "live");
+  seekVideos(true, false);
   for (const entry of state.entries) videoFor(entry).playbackRate = rate;
   try {
     await Promise.all(state.entries.map((entry) => videoFor(entry).play()));
@@ -477,14 +583,17 @@ els.timeSlider.addEventListener("input", () => {
 });
 els.stepBackButton.addEventListener("click", () => {
   pauseVideos();
-  setElapsed(state.elapsed - referenceStep(), true);
+  stepSharedFrame(-1);
 });
 els.stepForwardButton.addEventListener("click", () => {
   pauseVideos();
-  setElapsed(state.elapsed + referenceStep(), true);
+  stepSharedFrame(1);
 });
 els.playButton.addEventListener("click", () => {
-  if (state.playing) pauseVideos();
+  if (state.playing) {
+    pauseVideos();
+    seekVideos(true, true);
+  }
   else startPlayback();
 });
 els.speedSelect.addEventListener("change", () => {

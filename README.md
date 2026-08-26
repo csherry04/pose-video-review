@@ -10,6 +10,7 @@ and save per-camera frame offsets manually.
 - OpenPose BODY_25 pickles
 - OpenCap HRNet/MMPose pickles, both processed and older raw formats
 - Shared playback, scrubbing, frame stepping, speed, and looping
+- Exact per-frame presentation-timestamp indexing and browser verification
 - Per-camera frame alignment sliders
 - Saved and unsaved trial filters
 - Resizable tiles and a focused single-camera view
@@ -66,6 +67,30 @@ When a browser-compatible `_sync` video exists, the viewer uses it and aligns
 it with the original pose frames automatically. Otherwise it uses the original
 video. Browser-compatible H.264 MP4 files provide the most reliable playback.
 
+## Frame accuracy
+
+FFprobe indexes the presentation timestamp of every displayed video frame at
+startup. The browser seeks inside the requested frame's presentation interval,
+then `requestVideoFrameCallback` reports the timestamp of the frame actually
+sent to the compositor. The pose overlay and displayed frame number follow that
+confirmed frame rather than an estimated `frame / fps` time.
+
+Camera headers show the current state:
+
+- `frame N ✓` means the requested paused frame was presented and verified.
+- `seeking frame N…` means verification is still in progress.
+- `frame N ≠ requested M` means the browser did not present the requested frame
+  after three attempts.
+- `frame N · live` means playback is smooth and the overlay follows each frame
+  reported by the compositor.
+- `unverified` means the browser lacks `requestVideoFrameCallback`; playback
+  still works using the timestamp index, but exact presentation cannot be
+  confirmed.
+
+This verifies the frame in the displayed video. Mapping a `_sync` video back to
+the original pose sequence still assumes the synchronized file is a contiguous
+trim; the scanner estimates that trim offset from five image samples.
+
 ## Saving alignment
 
 Drag a camera's frame slider to align it with the shared timeline, then click
@@ -78,6 +103,7 @@ This generated file is ignored by Git.
 ```bash
 python -m unittest discover -s tests -v
 node --check src/pose_video_review/static/app.js
+node tests/test_timing.js
 ```
 
 Only load pickle files from sources you trust; Python pickles can execute code

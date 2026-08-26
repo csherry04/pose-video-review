@@ -1,12 +1,25 @@
+import json
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from pose_video_review.discovery import discover_folder, discover_session
+from pose_video_review.discovery import discover_folder, discover_session, frame_timestamps
 
 
 METADATA = (60.0, 720, 1280, 120)
+FRAME_TIMES = [index / 60 for index in range(120)]
+
+
+@contextmanager
+def discovery_metadata():
+    with (
+        patch("pose_video_review.discovery.video_metadata", return_value=METADATA),
+        patch("pose_video_review.discovery.frame_timestamps", return_value=FRAME_TIMES),
+    ):
+        yield
 
 
 def create_trial(
@@ -32,7 +45,7 @@ class DiscoveryTests(unittest.TestCase):
             session = Path(directory) / "OpenCapData_session"
             video, pose = create_trial(session)
 
-            with patch("pose_video_review.discovery.video_metadata", return_value=METADATA):
+            with discovery_metadata():
                 entries = discover_session(session)
 
             self.assertEqual(len(entries), 1)
@@ -40,6 +53,8 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(entries[0]["videoPath"], str(video.resolve()))
             self.assertEqual(entries[0]["posePath"], str(pose.resolve()))
             self.assertEqual(entries[0]["poseType"], "OpenPose")
+            self.assertEqual(entries[0]["frameTimes"], FRAME_TIMES)
+            self.assertEqual(entries[0]["frameTiming"], "verified-pts")
 
     def test_discovers_current_openpose_and_hrnet_layouts(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -51,7 +66,7 @@ class DiscoveryTests(unittest.TestCase):
                 session, "Cam1", "squat", "OutputPkl_mmpose_0.8/squat", "trial-id_rotated_pp.pkl"
             )
 
-            with patch("pose_video_review.discovery.video_metadata", return_value=METADATA):
+            with discovery_metadata():
                 entries = discover_session(session)
 
             self.assertEqual({entry["posePath"] for entry in entries}, {str(openpose.resolve()), str(hrnet.resolve())})
@@ -66,7 +81,7 @@ class DiscoveryTests(unittest.TestCase):
             processed = raw.with_name("trial-id_rotated_pp.pkl")
             processed.touch()
 
-            with patch("pose_video_review.discovery.video_metadata", return_value=METADATA):
+            with discovery_metadata():
                 entries = discover_session(session)
 
             self.assertEqual(entries[0]["posePath"], str(processed.resolve()))
@@ -77,7 +92,7 @@ class DiscoveryTests(unittest.TestCase):
             create_trial(session, trial="neutral")
             create_trial(session, trial="squat")
 
-            with patch("pose_video_review.discovery.video_metadata", return_value=METADATA):
+            with discovery_metadata():
                 entries = discover_session(session)
 
             self.assertEqual([entry["trial"] for entry in entries], ["squat"])
@@ -88,7 +103,7 @@ class DiscoveryTests(unittest.TestCase):
             create_trial(root / "OpenCapData_one")
             create_trial(root / "nested" / "OpenCapData_two")
 
-            with patch("pose_video_review.discovery.video_metadata", return_value=METADATA):
+            with discovery_metadata():
                 entries = discover_folder(root)
 
             self.assertEqual([entry["id"] for entry in entries], ["0", "1"])
@@ -105,13 +120,33 @@ class DiscoveryTests(unittest.TestCase):
             sync.touch()
 
             with (
-                patch("pose_video_review.discovery.video_metadata", return_value=METADATA),
+                discovery_metadata(),
                 patch("pose_video_review.discovery.infer_sync_frame_offset", return_value=12),
             ):
                 entry = discover_session(session)[0]
 
             self.assertEqual(entry["videoPath"], str(sync.resolve()))
             self.assertEqual(entry["poseFrameOffset"], 12)
+
+    def test_reads_and_normalizes_ffprobe_frame_timestamps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            video = Path(directory) / "video.mp4"
+            video.touch()
+            output = json.dumps({"frames": [
+                {"best_effort_timestamp_time": "2.000000"},
+                {"best_effort_timestamp_time": "2.016667"},
+                {"best_effort_timestamp_time": "2.033333"},
+            ]})
+            completed = SimpleNamespace(stdout=output, stderr="")
+
+            with (
+                patch("pose_video_review.discovery.shutil.which", return_value="/usr/bin/ffprobe"),
+                patch("pose_video_review.discovery.subprocess.run", return_value=completed) as run,
+            ):
+                timestamps = frame_timestamps(video)
+
+            self.assertEqual(timestamps, [0.0, 0.016667, 0.033333])
+            self.assertIn("-show_frames", run.call_args.args[0])
 
 
 if __name__ == "__main__":

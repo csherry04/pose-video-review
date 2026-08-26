@@ -57,6 +57,12 @@ main { padding: 20px 22px 112px; }
 .camera-tile.focused .video-stage { flex: 1; min-height: 0; aspect-ratio: auto !important; }
 .camera-tile header, .camera-tile footer { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; color: var(--muted); font-size: 12px; }
 .camera-tile header strong { color: #edf6f1; font-size: 13px; }
+.frame-label { font-variant-numeric: tabular-nums; }
+.frame-label.verified { color: #8cf5bd; }
+.frame-label.live { color: #70c7f0; }
+.frame-label.seeking { color: #f2cf7d; }
+.frame-label.mismatch { color: #ff9d9d; }
+.frame-label.unverified { color: var(--muted); }
 .camera-tile footer { border-top: 1px solid var(--line); align-items: center; }
 .video-stage { position: relative; width: 100%; overflow: hidden; cursor: zoom-in; background: #050706; }
 .camera-tile.focused .video-stage { cursor: zoom-out; }
