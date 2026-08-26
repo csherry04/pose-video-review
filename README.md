@@ -12,12 +12,13 @@ and save per-camera frame offsets manually.
 - Shared playback, scrubbing, frame stepping, speed, and looping
 - Exact per-frame presentation-timestamp indexing and browser verification
 - Per-camera frame alignment sliders
-- Saved and unsaved trial filters
+- Independent Dynamic/Neutral and Saved/Unsaved trial filters
 - Resizable tiles and a focused single-camera view
 
-Neutral trials are excluded. The viewer only reads videos and pose pickles; it
-does not modify them or require OpenSim, a GPU, a workstation, or a cloud
-service.
+Dynamic trials are shown by default. Neutral trials are available through the
+**Trial type** filter and use the same saved/unsaved offset status as dynamic
+trials. The viewer only reads videos and pose pickles; it does not modify them
+or require OpenSim, a GPU, a workstation, or a cloud service.
 
 ## Install
 
@@ -104,6 +105,7 @@ This generated file is ignored by Git.
 python -m unittest discover -s tests -v
 node --check src/pose_video_review/static/app.js
 node tests/test_timing.js
+node tests/test_filters.js
 ```
 
 Only load pickle files from sources you trust; Python pickles can execute code

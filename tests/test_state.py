@@ -13,6 +13,7 @@ def entries(root: Path) -> list[dict]:
         {
             "id": str(index),
             "trial": "squat",
+            "trialType": "dynamic",
             "camera": f"Cam{index}",
             "videoPath": str(root / f"cam{index}.mp4"),
             "posePath": str(root / f"cam{index}.pkl"),
@@ -28,6 +29,18 @@ def entries(root: Path) -> list[dict]:
 
 
 class StateTests(unittest.TestCase):
+    def test_trial_summary_includes_trial_type(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            discovered = entries(root)
+            discovered[0]["trial"] = "neutral"
+            discovered[0]["trialType"] = "neutral"
+            with patch("pose_video_review.state.discover_folder", return_value=discovered):
+                state = ViewerState(root)
+
+            summaries = {trial["id"]: trial["trialType"] for trial in state.trials()}
+            self.assertEqual(summaries, {"neutral": "neutral", "squat": "dynamic"})
+
     def test_saved_status_requires_every_camera_even_for_zero_offsets(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -86,7 +86,7 @@ class DiscoveryTests(unittest.TestCase):
 
             self.assertEqual(entries[0]["posePath"], str(processed.resolve()))
 
-    def test_excludes_neutral_trials(self):
+    def test_discovers_and_labels_neutral_trials(self):
         with tempfile.TemporaryDirectory() as directory:
             session = Path(directory) / "OpenCapData_session"
             create_trial(session, trial="neutral")
@@ -95,7 +95,10 @@ class DiscoveryTests(unittest.TestCase):
             with discovery_metadata():
                 entries = discover_session(session)
 
-            self.assertEqual([entry["trial"] for entry in entries], ["squat"])
+            self.assertEqual(
+                {(entry["trial"], entry["trialType"]) for entry in entries},
+                {("neutral", "neutral"), ("squat", "dynamic")},
+            )
 
     def test_discovers_multiple_sessions_and_uses_unique_ids(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -153,7 +153,7 @@ def _pose_type(path: Path) -> str:
 
 
 def discover_session(path: Path) -> list[dict]:
-    """Discover dynamic trials in one OpenCap session."""
+    """Discover trials in one OpenCap session."""
     session_path = path.expanduser().resolve()
     videos_dir = session_path / "Videos"
     if not videos_dir.is_dir():
@@ -168,8 +168,6 @@ def discover_session(path: Path) -> list[dict]:
             if details is None:
                 continue
             trial, original_stem, processed = details
-            if _is_neutral(trial):
-                continue
             key = (camera_dir.name, trial)
             priority = 2 if processed else 1
             if key not in candidates or priority > candidates[key][0]:
@@ -203,6 +201,7 @@ def discover_session(path: Path) -> list[dict]:
                 pose_frame_offset = infer_sync_frame_offset(original, sync)
         rows.append({
             "trial": trial,
+            "trialType": "neutral" if _is_neutral(trial) else "dynamic",
             "camera": camera,
             "videoPath": str(video.resolve()),
             "posePath": str(pose_path.resolve()),
@@ -222,7 +221,7 @@ def discover_session(path: Path) -> list[dict]:
 
     if not rows:
         raise ValueError(
-            "No dynamic OpenCap trials found. Expected Videos/Cam*/InputMedia/<trial> "
+            "No OpenCap trials found. Expected Videos/Cam*/InputMedia/<trial> "
             "videos with matching OutputPkl* pose files."
         )
     for index, entry in enumerate(rows):

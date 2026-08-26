@@ -20,11 +20,12 @@ const els = Object.fromEntries([
   "trialSelect", "showPose", "status", "cameraGrid", "playButton",
   "stepBackButton", "stepForwardButton", "timeSlider", "currentTime",
   "duration", "speedSelect", "loopPlayback", "tileSize", "tileSizeValue",
-  "saveOffsetsButton", "saveFilter",
+  "saveOffsetsButton", "trialTypeFilter", "saveFilter",
 ].map((id) => [id, document.getElementById(id)]));
 
 const TILE_SIZE_STORAGE_KEY = "pose-video-review:tile-size";
 const { frameForMediaTime: indexedFrameForMediaTime, frameSeekTime: indexedFrameSeekTime } = FrameTiming;
+const { filterTrials } = TrialFilters;
 
 async function getJson(url) {
   const response = await fetch(url);
@@ -55,15 +56,21 @@ function trialStatusLabel(trial) {
 }
 
 function filteredTrials() {
-  const filter = els.saveFilter.value;
-  return filter === "all" ? state.trials : state.trials.filter((trial) => trial.saveStatus === filter);
+  return filterTrials(state.trials, els.trialTypeFilter.value, els.saveFilter.value);
 }
 
 function renderTrialOptions(preferredId = els.trialSelect.value) {
   const trials = filteredTrials();
+  const typeCounts = { dynamic: 0, neutral: 0 };
+  for (const trial of state.trials) typeCounts[trial.trialType] += 1;
+  els.trialTypeFilter.options[0].textContent = `Dynamic (${typeCounts.dynamic})`;
+  els.trialTypeFilter.options[1].textContent = `Neutral (${typeCounts.neutral})`;
+  els.trialTypeFilter.options[2].textContent = `All trials (${state.trials.length})`;
+
+  const typeTrials = filterTrials(state.trials, els.trialTypeFilter.value, "all");
   const counts = { unsaved: 0, saved: 0 };
-  for (const trial of state.trials) counts[trial.saveStatus] += 1;
-  els.saveFilter.options[0].textContent = `All (${state.trials.length})`;
+  for (const trial of typeTrials) counts[trial.saveStatus] += 1;
+  els.saveFilter.options[0].textContent = `All (${typeTrials.length})`;
   els.saveFilter.options[1].textContent = `Unsaved (${counts.unsaved})`;
   els.saveFilter.options[2].textContent = `Saved (${counts.saved})`;
   els.trialSelect.innerHTML = "";
@@ -84,7 +91,12 @@ function showEmptyFilter() {
   state.entries = [];
   els.cameraGrid.innerHTML = "";
   els.saveOffsetsButton.disabled = true;
-  setStatus(`No ${els.saveFilter.value} trials`);
+  const parts = [
+    els.saveFilter.value === "all" ? "" : els.saveFilter.value,
+    els.trialTypeFilter.value === "all" ? "" : els.trialTypeFilter.value,
+    "trials",
+  ];
+  setStatus(`No ${parts.filter(Boolean).join(" ")}`);
 }
 
 function setTileSize(value) {
@@ -569,11 +581,14 @@ async function saveOffsets() {
 }
 
 els.trialSelect.addEventListener("change", () => loadTrial(els.trialSelect.value).catch((error) => setStatus(error.message, true)));
-els.saveFilter.addEventListener("change", () => {
+function applyTrialFilters() {
   const nextId = renderTrialOptions();
   if (nextId) loadTrial(nextId).catch((error) => setStatus(error.message, true));
   else showEmptyFilter();
-});
+}
+
+els.trialTypeFilter.addEventListener("change", applyTrialFilters);
+els.saveFilter.addEventListener("change", applyTrialFilters);
 els.saveOffsetsButton.addEventListener("click", saveOffsets);
 els.tileSize.addEventListener("input", () => setTileSize(els.tileSize.value));
 els.showPose.addEventListener("change", render);
@@ -619,6 +634,9 @@ setTileSize(localStorage.getItem(TILE_SIZE_STORAGE_KEY) || els.tileSize.value);
 
 getJson("/api/trials").then(({ trials }) => {
   state.trials = trials;
-  if (!trials.length) throw new Error("No dynamic trials were found.");
-  return loadTrial(renderTrialOptions());
+  if (!trials.length) throw new Error("No trials were found.");
+  const firstId = renderTrialOptions();
+  if (firstId) return loadTrial(firstId);
+  showEmptyFilter();
+  return undefined;
 }).catch((error) => setStatus(error.message, true));

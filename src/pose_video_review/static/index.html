@@ -14,7 +14,15 @@
         <select id="trialSelect"></select>
       </label>
       <label class="filter-field">
-        <span>Show</span>
+        <span>Trial type</span>
+        <select id="trialTypeFilter">
+          <option value="dynamic" selected>Dynamic</option>
+          <option value="neutral">Neutral</option>
+          <option value="all">All trials</option>
+        </select>
+      </label>
+      <label class="filter-field">
+        <span>Status</span>
         <select id="saveFilter">
           <option value="all">All</option>
           <option value="unsaved">Unsaved</option>
@@ -54,6 +62,7 @@
       </section>
     </main>
     <script src="/static/timing.js"></script>
+    <script src="/static/filters.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

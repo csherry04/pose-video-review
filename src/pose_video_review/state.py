@@ -76,6 +76,7 @@ class ViewerState:
         return [
             {
                 "id": trial,
+                "trialType": entries[0]["trialType"],
                 "cameraCount": len(entries),
                 "saveStatus": "saved" if all(entry["hasSavedOffset"] for entry in entries) else "unsaved",
             }
