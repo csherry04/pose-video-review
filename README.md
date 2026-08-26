@@ -1,23 +1,14 @@
 # Pose Video Review
 
-A local browser interface for reviewing multi-camera OpenCap trials. It shows
-camera videos side by side, draws their 2D pose detections, and lets you adjust
-and save per-camera frame offsets manually.
+This is a tool to view an OpenCap session with its pose pickles overlayed and allow for easy scrubbing, focused views, and customizing sync offsets between cameras. 
 
-## What it supports
+## Supports
 
 - One OpenCap session or a folder containing multiple sessions
-- OpenPose BODY_25 pickles
-- OpenCap HRNet/MMPose pickles, both processed and older raw formats
-- Shared playback, scrubbing, frame stepping, speed, and looping
-- Exact per-frame presentation-timestamp indexing and browser verification
-- Per-camera frame alignment sliders
-- Saved and unsaved trial filters
+- OpenPose and HRNet pickles
+- Shared playback, scrubbing, frame stepping
+- Per-camera sliders to apply delays
 - Resizable tiles and a focused single-camera view
-
-Neutral trials are excluded. The viewer only reads videos and pose pickles; it
-does not modify them or require OpenSim, a GPU, a workstation, or a cloud
-service.
 
 ## Install
 
@@ -47,7 +38,7 @@ If the sessions are inside the repository, the folder argument can be omitted:
 pose-video-review
 ```
 
-Open <http://127.0.0.1:8877>. Use `--port 9000` if that port is already in use.
+Open <http://127.0.0.1:8877>.
 
 ## Expected OpenCap files
 
@@ -65,15 +56,13 @@ OpenCapData_<id>/
 
 When a browser-compatible `_sync` video exists, the viewer uses it and aligns
 it with the original pose frames automatically. Otherwise it uses the original
-video. Browser-compatible H.264 MP4 files provide the most reliable playback.
+video. 
 
 ## Frame accuracy
 
-FFprobe indexes the presentation timestamp of every displayed video frame at
-startup. The browser seeks inside the requested frame's presentation interval,
-then `requestVideoFrameCallback` reports the timestamp of the frame actually
-sent to the compositor. The pose overlay and displayed frame number follow that
-confirmed frame rather than an estimated `frame / fps` time.
+Due to some occasional inaccuracies with frame seeking, the frames are first indexed
+with their timestamp and this timestamp is compared to the timestamp being displayed
+in app to verify it is the correct frame. This is what the top right in each camera view is saying.
 
 Camera headers show the current state:
 
@@ -87,15 +76,12 @@ Camera headers show the current state:
   still works using the timestamp index, but exact presentation cannot be
   confirmed.
 
-This verifies the frame in the displayed video. Mapping a `_sync` video back to
-the original pose sequence still assumes the synchronized file is a contiguous
-trim; the scanner estimates that trim offset from five image samples.
-
 ## Saving alignment
 
 Drag a camera's frame slider to align it with the shared timeline, then click
 **Save offsets**. Offsets are written to `pose-video-offsets.json` in the folder
-passed to the command and loaded automatically the next time it is opened.
+passed to the command and loaded automatically the next time it is opened. Otherwise
+it is written to the current terminal directory. 
 This generated file is ignored by Git.
 
 ## Test
@@ -106,5 +92,3 @@ node --check src/pose_video_review/static/app.js
 node tests/test_timing.js
 ```
 
-Only load pickle files from sources you trust; Python pickles can execute code
-when opened.
