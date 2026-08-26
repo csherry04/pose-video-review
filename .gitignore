@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.conda/
+.DS_Store
+
+# Local data and generated review state
+OpenCapData_*/
+pose-video-offsets.json
