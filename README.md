@@ -1,23 +1,16 @@
 # Pose Video Review
 
-This tool displays OpenCap sessions with their pose pickles overlaid. It supports
-easy scrubbing, focused camera views, and manual sync offsets between cameras.
+This is a tool for viewing OpenCap Sessions with their pose pickles overlaid. It supports
+scrubbing and playback of the videos as well as adjusting of the individual camera delays.
 
 ## Supports
 
 - One OpenCap session or a folder containing multiple sessions
-- OpenPose BODY_25 pickles
-- OpenCap HRNet/MMPose pickles, both processed and older raw formats
+- OpenPose or HRNet pickles
 - Shared playback, scrubbing, frame stepping, speed, and looping
-- Exact per-frame presentation-timestamp indexing and browser verification
-- Per-camera frame alignment sliders
-- Independent Dynamic/Neutral and Saved/Unsaved trial filters
-- Resizable tiles and a focused single-camera view
+- Per camera adjustments saved to json 
 
-Dynamic trials are shown by default. Neutral trials are available through the
-**Trial type** filter and use the same saved/unsaved offset status as dynamic
-trials. The viewer only reads videos and pose pickles; it does not modify them
-or require OpenSim, a GPU, a workstation, or a cloud service.
+Dynamic trials are shown by default. Neutral trials are available in the top filter menu.
 
 ## Install
 
@@ -86,10 +79,6 @@ Camera headers show the current state:
   still works using the timestamp index, but exact presentation cannot be
   confirmed.
 
-This verifies the frame in the displayed video. Mapping a `_sync` video back to
-the original pose sequence assumes the synchronized file is a contiguous trim;
-the scanner estimates that trim offset from five image samples.
-
 ## Saving alignment
 
 Drag a camera's frame slider to align it with the shared timeline, then click
@@ -106,6 +95,3 @@ node --check src/pose_video_review/static/app.js
 node tests/test_timing.js
 node tests/test_filters.js
 ```
-
-Only load pickle files from sources you trust; Python pickles can execute code
-when opened.
