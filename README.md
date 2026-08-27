@@ -1,10 +1,9 @@
 # Pose Video Review
 
-A local browser interface for reviewing multi-camera OpenCap trials. It shows
-camera videos side by side, draws their 2D pose detections, and lets you adjust
-and save per-camera frame offsets manually.
+This tool displays OpenCap sessions with their pose pickles overlaid. It supports
+easy scrubbing, focused camera views, and manual sync offsets between cameras.
 
-## What it supports
+## Supports
 
 - One OpenCap session or a folder containing multiple sessions
 - OpenPose BODY_25 pickles
@@ -48,7 +47,7 @@ If the sessions are inside the repository, the folder argument can be omitted:
 pose-video-review
 ```
 
-Open <http://127.0.0.1:8877>. Use `--port 9000` if that port is already in use.
+Open <http://127.0.0.1:8877>.
 
 ## Expected OpenCap files
 
@@ -66,15 +65,14 @@ OpenCapData_<id>/
 
 When a browser-compatible `_sync` video exists, the viewer uses it and aligns
 it with the original pose frames automatically. Otherwise it uses the original
-video. Browser-compatible H.264 MP4 files provide the most reliable playback.
+video.
 
 ## Frame accuracy
 
-FFprobe indexes the presentation timestamp of every displayed video frame at
-startup. The browser seeks inside the requested frame's presentation interval,
-then `requestVideoFrameCallback` reports the timestamp of the frame actually
-sent to the compositor. The pose overlay and displayed frame number follow that
-confirmed frame rather than an estimated `frame / fps` time.
+Because browser frame seeking can occasionally be inaccurate, the viewer first
+indexes every frame timestamp. It then compares the requested timestamp with
+the timestamp the browser actually displays. Each camera header reports the
+result.
 
 Camera headers show the current state:
 
@@ -89,15 +87,16 @@ Camera headers show the current state:
   confirmed.
 
 This verifies the frame in the displayed video. Mapping a `_sync` video back to
-the original pose sequence still assumes the synchronized file is a contiguous
-trim; the scanner estimates that trim offset from five image samples.
+the original pose sequence assumes the synchronized file is a contiguous trim;
+the scanner estimates that trim offset from five image samples.
 
 ## Saving alignment
 
 Drag a camera's frame slider to align it with the shared timeline, then click
 **Save offsets**. Offsets are written to `pose-video-offsets.json` in the folder
-passed to the command and loaded automatically the next time it is opened.
-This generated file is ignored by Git.
+passed to the command and loaded automatically the next time it is opened. If
+no folder is passed, it is written to the current terminal directory. This
+generated file is ignored by Git.
 
 ## Test
 
